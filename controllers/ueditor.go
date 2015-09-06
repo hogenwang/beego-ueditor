@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/astaxie/beego"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,7 +48,7 @@ func (this *UEController) UEditor() {
 	switch {
 	case action == "config":
 		Config(&this.Controller)
-	case action == "uploadimage" || action == "uploadscrawl" || action == "catchimage":
+	case action == "uploadimage" || action == "uploadscrawl":
 		UploadImage(&this.Controller)
 	case action == "uploadvideo":
 		UploadVedio(&this.Controller)
@@ -56,6 +58,8 @@ func (this *UEController) UEditor() {
 		ImageManager(&this.Controller)
 	case action == "listfile":
 		FilesManager(&this.Controller)
+	case action == "catchimage":
+		CatchImage(&this.Controller)
 	}
 }
 
@@ -208,4 +212,49 @@ func FilesManager(this *beego.Controller) {
 	fmt.Println(strRet)
 	this.Ctx.WriteString(callbackjson)
 	this.StopRun()
+}
+
+//远程抓图
+func CatchImage(this *beego.Controller) {
+	//fmt.Println(this.Ctx.Request.Body)
+	urls := this.GetStrings("source[]")
+	//fmt.Println(urls)
+	callbackjson := "{\"state\": \"SUCCESS\",\"list\": ["
+	if len(urls) > 0 {
+		for _, v := range urls {
+			//去掉最后的!后面部分
+			l := v
+			//判断扩展名是否合法
+			ext := l[strings.LastIndex(l, ".")+1:]
+
+			if strings.Contains(allowImageType, ext) {
+				//获取文件名
+				filename := l[strings.LastIndex(l, "/")+1:]
+				newname := strconv.FormatInt(time.Now().Unix(), 10) + "_" + filename
+				res, err := http.Get(l)
+				defer res.Body.Close()
+				if err != nil {
+					callbackjson += "{\"url\": \"\",\"source\": \"" + l + "\",\"state\": \"ERROR\"},"
+					fmt.Println("Error:远程抓取失败；", err)
+				} else {
+					dst, err := os.Create(uploadimage + newname)
+					if err != nil {
+						callbackjson += "{\"url\": \"\",\"source\": \"" + l + "\",\"state\": \"ERROR\"},"
+						fmt.Println("Error:保存失败；", err)
+					} else {
+						callbackjson += "{\"url\": \"" + uploadimage + newname + "\",\"source\": \"" + l + "\",\"state\": \"SUCCESS\"},"
+						io.Copy(dst, res.Body)
+					}
+				}
+
+			} else {
+				callbackjson += "{\"url\": \"\",\"source\": \"" + l + "\",\"state\": \"ERROR\"},"
+			}
+			//fmt.Println(l)
+		}
+	}
+	callbackjson += "]}"
+	this.Ctx.WriteString(callbackjson)
+	this.StopRun()
+	return
 }
